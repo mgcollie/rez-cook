@@ -161,7 +161,7 @@ def patch(patch_str: str):
 
 
 def cook_recipe(
-    recipe: Variant, prefix: str, no_cleanup: bool, verbose_build: bool
+    recipe: Variant, prefix: str, verbose_build: bool
 ):
     """
     Cook `recipe`.
@@ -308,12 +308,6 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Don't actually build the recipes, just display the cook list",
-    )
-    parser.add_argument(
-        "-nc",
-        "--no-cleanup",
-        action="store_true",
-        help="Don't clean up temporary directories on failure",
     )
     parser.add_argument(
         "-bb",
@@ -653,4 +647,4 @@ if __name__ == "__main__":
     for recipe in selected_to_cook.values():
         LOG.debug(f"Cooking {recipe.qualified_package_name}{recipe.variant_text}")
         LOG.debug(f"With: {', '.join([str(r) for r in recipe.get_requires(build_requires=True)])}")
-        cook_recipe(recipe, install_prefix, args.no_cleanup, args.verbose_build)
+        cook_recipe(recipe, install_prefix, args.verbose_build)
