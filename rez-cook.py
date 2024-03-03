@@ -289,7 +289,18 @@ def cook_recipe(
             os.chdir(old_dir)
 
 
-if __name__ == "__main__":
+def parse_args() -> argparse.Namespace:
+    """
+    Parse the command line arguments for the script.
+
+    This function defines the command line arguments for the script, handles
+    parsing them, and returns the parsed arguments. It uses Python's argparse
+    module to define what arguments the script accepts, their types, and the
+    help messages to display for each argument.
+
+    Returns:
+        argparse.Namespace: An object containing the command line arguments and their values.
+    """
     parser = argparse.ArgumentParser(
         description="Fetch recipes and build packages from them"
     )
@@ -348,7 +359,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Don't ask for confirmation, just cook the selected recipes",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
     recipes_path = Path(RECIPES_PATH)
 
     # Rez overrides some logging config and breaks our logging.
