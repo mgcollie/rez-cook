@@ -5,8 +5,9 @@ import platform
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 import rez.config
 from package_list import PackageList
@@ -36,6 +37,32 @@ COOK_PATH = os.path.join(tempfile.gettempdir(), "rez-cook")
 
 REQUESTED_VARIANT = PLATFORM_VARIANT  # + constraints
 
+
+@contextmanager
+def change_dir(target_directory: Path) -> Iterator[None]:
+    """
+    Change the current working directory to the target directory,
+    and then change it back to the original directory after the
+    context block is exited.
+
+    Args:
+        target_directory (str): The path to the directory to which
+                                the current working directory should be changed.
+
+    Yields:
+        None: This function is used as a context manager and does not
+              yield any value, but provides a context for the directory change.
+
+    Usage:
+        with change_dir('/path/to/new/directory'):
+            # perform operations in the new directory
+    """
+    current_directory = os.getcwd()
+    try:
+        os.chdir(target_directory)
+        yield
+    finally:
+        os.chdir(current_directory)
 
 def load_module(name: str, path: str, global_vars: Optional[Dict] = None):
     """
@@ -204,7 +231,6 @@ def cook_recipe(
     os.makedirs(build_path)
 
     # load the package and run pre_cook() if it's defined
-    old_dir = os.getcwd()
     variant_list = PackageList(recipe.variant_requires)
     mod = load_module(
         f"{name}-{version}-{recipe.variant_requires}",
@@ -234,29 +260,25 @@ def cook_recipe(
     setattr(mod, "fetch_repository", fetch_repository)
 
     try:
-        os.chdir(staging_path)
-        if "pre_cook" in dir(mod):
-            mod.pre_cook()
+        with change_dir(staging_path):
+            if "pre_cook" in dir(mod):
+                mod.pre_cook()
     except Exception as e:
         LOG.exception(f"Pre-cooking failed for {name}-{version} {cook_variant}: {e}")
-        raise e
-    finally:
-        os.chdir(old_dir)
+        raise
 
     # Now do the actual build
     # Use cook() if it's available, otherwise use the build_command
     if "cook" in dir(mod):
         try:
-            os.chdir(build_path)
-            os.makedirs(install_path)
-            LOG.info(f"Cooking {name}-{version} {cook_variant}")
-            mod.cook()
+            with change_dir(build_path):  # Use context manager here as well
+                os.makedirs(install_path, exist_ok=True)
+                LOG.info(f"Cooking {name}-{version} {cook_variant}")
+                mod.cook()
         except Exception as e:
-            LOG.exception(f"\nCook failed for {name}-{version} {cook_variant}: {e}")
+            LOG.exception(f"Cook failed for {name}-{version} {cook_variant}: {e}")
             rmtree_for_real(install_path)
-            raise e
-        finally:
-            os.chdir(old_dir)
+            raise
     else:
         os.environ["REZ_COOK_VARIANT"] = str(cook_variant)
         build_args = []
@@ -278,8 +300,6 @@ def cook_recipe(
         except BuildContextResolveError as e:
             LOG.error(str(e))
             raise e
-        finally:
-            os.chdir(old_dir)
 
 
 def parse_args() -> argparse.Namespace:
@@ -550,7 +570,7 @@ if __name__ == "__main__":
             selected_to_cook[recipe_name] = recipe
 
     if selected_installed:
-        LOG.info()
+        LOG.info("")
         LOG.info("Using already installed dependencies:")
         for dep in selected_installed.values():
             dirs = [x.safe_str() for x in dep.variant_requires]
@@ -563,7 +583,7 @@ if __name__ == "__main__":
             LOG.info(f"    {dep.qualified_package_name}{variant_text}")
 
     if selected_to_cook:
-        LOG.info()
+        LOG.info("")
         LOG.info("Cooking:")
         subpath_errors = []
         recipe_variant_requires = {}
@@ -621,7 +641,7 @@ if __name__ == "__main__":
                 if rec.hashed_variants:
                     rec.variant_text = f"{rec.variant_text} ({expected_subpath})"
             LOG.info(f"    {rec.qualified_package_name}{rec.variant_text}")
-        LOG.info()
+        LOG.info("")
 
         if subpath_errors:
             LOG.error("Some package subpath are wrong:")
