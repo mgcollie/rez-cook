@@ -362,21 +362,38 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    recipes_path = Path(RECIPES_PATH)
+def setup_logging(debug: bool = False) -> None:
+    """
+    Configures logging for the application.
 
-    # Rez overrides some logging config and breaks our logging.
-    # Let's fix that.
+    This function sets up the logging by adding a stream handler and setting the
+    formatting based on whether debug mode is enabled or not. It is designed to
+    override any existing logging configurations that may interfere with the desired
+    logging setup, such as those set by other libraries or frameworks.
+
+    Args:
+        debug (bool): If True, sets the logging level to DEBUG and includes detailed
+                      information in each log message, such as the file name and line
+                      number. If False, sets the logging level to INFO and includes
+                      less detail in the log messages.
+
+    Returns:
+        None
+    """
     handler = logging.StreamHandler()
     LOG.addHandler(handler)
-    if args.debug:
+    if debug:
         handler.setFormatter(logging.Formatter("[%(levelname)s] %(filename)s:%(lineno)d %(message)s"))
         LOG.setLevel(logging.DEBUG)
     else:
         handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
         LOG.setLevel(logging.INFO)
 
+
+if __name__ == "__main__":
+    args = parse_args()
+    setup_logging(args.debug)
+    recipes_path = Path(RECIPES_PATH)
     config = rez.config.config
     install_prefix = args.prefix or config.local_packages_path
 
