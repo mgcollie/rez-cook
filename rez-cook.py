@@ -5,7 +5,6 @@ import platform
 import shutil
 import sys
 import tempfile
-import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -96,7 +95,7 @@ def download_and_unpack(
     """
     import shutil, os
 
-    print(f"Downloading {url}\n")
+    LOG.info(f"Downloading {url}\n")
     fn = download(url, local_dir)
 
     files_before = os.listdir(".")
@@ -194,7 +193,7 @@ def cook_recipe(
     os.makedirs(staging_path)
     shutil.copyfile(recipe_package_py_path, staging_package_py_path)
 
-    print(f"Building with {cook_variant}")
+    LOG.info(f"Building with {cook_variant}")
 
     install_root = Path(prefix, name, version)
     install_path = install_root
@@ -239,10 +238,7 @@ def cook_recipe(
         if "pre_cook" in dir(mod):
             mod.pre_cook()
     except Exception as e:
-        print(f"Pre-cooking failed for {name}-{version} {cook_variant}: {e}")
-        traceback.print_exc()
-        # if not no_cleanup:
-        #     rmtree_for_real(staging_path)
+        LOG.exception(f"Pre-cooking failed for {name}-{version} {cook_variant}: {e}")
         raise e
     finally:
         os.chdir(old_dir)
@@ -253,16 +249,14 @@ def cook_recipe(
         try:
             os.chdir(build_path)
             os.makedirs(install_path)
-            print(f"Cooking {name}-{version} {cook_variant}")
+            LOG.info(f"Cooking {name}-{version} {cook_variant}")
             mod.cook()
         except Exception as e:
-            print(f"\nCook failed for {name}-{version} {cook_variant}: {e}")
+            LOG.exception(f"\nCook failed for {name}-{version} {cook_variant}: {e}")
             rmtree_for_real(install_path)
             raise e
         finally:
             os.chdir(old_dir)
-            # if not no_cleanup:
-            #     rmtree_for_real(staging_path)
     else:
         os.environ["REZ_COOK_VARIANT"] = str(cook_variant)
         build_args = []
@@ -270,7 +264,7 @@ def cook_recipe(
             build_args = mod.build_args
 
         try:
-            print(f"Building {name}-{version} {cook_variant}")
+            LOG.info(f"Building {name}-{version} {cook_variant}")
             buildsys = create_build_system(str(staging_path),
                                            verbose=verbose_build,
                                            build_args=build_args)
@@ -282,8 +276,7 @@ def cook_recipe(
             builder.build(install_path=prefix,
                           install=True)
         except BuildContextResolveError as e:
-            print(str(e), file=sys.stderr)
-
+            LOG.error(str(e))
             raise e
         finally:
             os.chdir(old_dir)
@@ -314,7 +307,7 @@ def parse_args() -> argparse.Namespace:
         "-d",
         "--dry-run",
         action="store_true",
-        help="Don't actually build the recipes, just print the cook list",
+        help="Don't actually build the recipes, just display the cook list",
     )
     parser.add_argument(
         "-nc",
@@ -419,7 +412,7 @@ if __name__ == "__main__":
                        paths=[RECIPES_PATH])
     available_recipes = sorted(it, key=lambda x: x.version)
     if not available_recipes:
-        print(f"Could not find an available recipe for {recipe_request}")
+        LOG.error(f"Could not find an available recipe for {recipe_request}")
         sys.exit(1)
 
     constraints = [PackageRequest(c) for c in args.constrain] if args.constrain else []
@@ -563,8 +556,8 @@ if __name__ == "__main__":
             selected_to_cook[recipe_name] = recipe
 
     if selected_installed:
-        print()
-        print("Using already installed dependencies:")
+        LOG.info()
+        LOG.info("Using already installed dependencies:")
         for dep in selected_installed.values():
             dirs = [x.safe_str() for x in dep.variant_requires]
             subpath_str = os.path.join(*dirs) if dirs else None
@@ -573,11 +566,11 @@ if __name__ == "__main__":
                 variant_text = f"{os.path.sep}{subpath_str}"
                 if dep.hashed_variants:
                     variant_text = f"{variant_text} ({dep.subpath})"
-            print(f"    {dep.qualified_package_name}{variant_text}")
+            LOG.info(f"    {dep.qualified_package_name}{variant_text}")
 
     if selected_to_cook:
-        print()
-        print("Cooking:")
+        LOG.info()
+        LOG.info("Cooking:")
         subpath_errors = []
         recipe_variant_requires = {}
         for rec in selected_to_cook.values():
@@ -595,7 +588,7 @@ if __name__ == "__main__":
                 if not recipe_require:
                     # Something went wrong.
                     # The require is both not installed and not to be cooked.
-                    print(f"{str(req)} is not installed and not to be cooked. Aborting.")
+                    LOG.info(f"{str(req)} is not installed and not to be cooked. Aborting.")
                     sys.exit(1)
                 recipe_variant_requires[req.name] = recipe_require
 
@@ -633,8 +626,8 @@ if __name__ == "__main__":
                 rec.variant_text = f"{os.path.sep}{subpath_str}"
                 if rec.hashed_variants:
                     rec.variant_text = f"{rec.variant_text} ({expected_subpath})"
-            print(f"    {rec.qualified_package_name}{rec.variant_text}")
-        print()
+            LOG.info(f"    {rec.qualified_package_name}{rec.variant_text}")
+        LOG.info()
 
         if subpath_errors:
             LOG.error("Some package subpath are wrong:")
@@ -644,17 +637,17 @@ if __name__ == "__main__":
                 LOG.error(f"      Actual: {rec.subpath}")
             sys.exit(1)
     else:
-        print("Nothing to cook")
+        LOG.info("Nothing to cook")
         sys.exit(0)
 
     if args.dry_run:
-        print("Dry run. Exiting.")
+        LOG.info("Dry run. Exiting.")
         sys.exit(0)
 
     if not args.yes:
         c = input("Proceed? (y/n): ")
         if c.lower() != "y":
-            print("Exiting")
+            LOG.info("Exiting")
             sys.exit(0)
 
     for recipe in selected_to_cook.values():
