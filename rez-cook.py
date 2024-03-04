@@ -3,11 +3,13 @@ import logging
 import os
 import platform
 import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import rez.config
 from package_list import PackageList
@@ -64,6 +66,7 @@ def change_dir(target_directory: Path) -> Iterator[None]:
     finally:
         os.chdir(current_directory)
 
+
 def load_module(name: str, path: str, global_vars: Optional[Dict] = None):
     """
     Load a package.py module and bung in the @early() decorator along with any other globals
@@ -88,29 +91,31 @@ def load_module(name: str, path: str, global_vars: Optional[Dict] = None):
     return mod
 
 
-def rmtree_for_real(path: Path):
+def onerror(func: Callable[[str], Any], path: str, exc_info: Tuple[type, BaseException, Any]) -> None:
     """
-    Utility function to absolutely, positively delete a directory on both Windows and linux
+    Error handler for shutil.rmtree.
+
+    If the error is due to an access error (read-only file), it attempts to add write permission and then retries.
+    If the error is on Windows and is caused by a read-only attribute, it attempts to remove the attribute and retry.
+
+    Args:
+        func (function): The function that raised the error.
+        path (str): The path that caused the error.
+        exc_info (tuple): Exception information returned by sys.exc_info().
     """
-    import shutil
-
-    # Isn't Windows wonderful? You cannot delete a hidden file, which means
-    # you can't delete any of the .git stuff lots of releases check out when
-    # building without first removing those attributes
-    if os.name == "nt":
-
-        def yes_i_really_mean_it(func, dpath, exc_info):
-            # If it's a FileNotFound then just ignore it
-            # Why use one error code when you can have two at twice the price?
-            if exc_info[1].winerror in [2, 3]:
-                return
-
-            os.system(f"attrib -r -h -s {dpath}")
-            func(dpath)
-
-        shutil.rmtree(path, onerror=yes_i_really_mean_it)
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    elif os.name == 'nt':
+        try:
+            subprocess.call(['attrib', '-r', '-h', '-s', path])
+            func(path)
+        except subprocess.CalledProcessError as e:
+            LOG.error(f"Could not change the attributes or permissions of {path}: {e}")
+        except OSError as e:
+            LOG.error(f"OS error when changing attributes of {path}: {e}")
     else:
-        shutil.rmtree(path, ignore_errors=True)
+        LOG.error(f"Error deleting {path}: {exc_info[1]}")
 
 
 def download_and_unpack(
@@ -216,7 +221,7 @@ def cook_recipe(
     LOG.debug(f"Found package.py at {recipe_package_py_path}")
 
     # blow away anything in the staging path already
-    rmtree_for_real(staging_path)
+    shutil.rmtree(staging_path, onerror=onerror)
     os.makedirs(staging_path)
     shutil.copyfile(recipe_package_py_path, staging_package_py_path)
 
@@ -277,7 +282,7 @@ def cook_recipe(
                 mod.cook()
         except Exception as e:
             LOG.exception(f"Cook failed for {name}-{version} {cook_variant}: {e}")
-            rmtree_for_real(install_path)
+            shutil.rmtree(staging_path, onerror=onerror)
             raise
     else:
         os.environ["REZ_COOK_VARIANT"] = str(cook_variant)
